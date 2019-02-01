@@ -1,9 +1,8 @@
 import { SearchService } from 'azure-search-client';
 import csvParse = require('csv-parse');
 import { config } from 'dotenv';
-import { createReadStream } from 'fs';
-import { pipeline } from 'stream';
-import * as map from 'through2-map';
+import { createReadStream } from 'fs-extra';
+import * as through from 'through2';
 
 import { BOOLEAN_FIELDS_IX, DROP_HEADERS_IX, HEADERS, JSON_MULTI_VALUE_HEADERS_IX, MULTI_VALUE_HEADERS, MULTI_VALUE_HEADERS_IX } from './headers';
 
@@ -12,8 +11,33 @@ config({ path: `${__dirname}/../.env` });
 const SEARCH_SERVICE = process.env.SEARCH_SERVICE;
 const SEARCH_KEY = process.env.SEARCH_KEY;
 const DATA_FILE = '../data/MetArtworksAugmented.csv';
+const HAS_MULTI_IX: { [key: string]: boolean } = {};
+const BATCH_SIZE = 5000;
+const INDEX_NAME = 'artworks9';
 
-const search = new SearchService(SEARCH_SERVICE, SEARCH_KEY);
+MULTI_VALUE_HEADERS.forEach((k) => HAS_MULTI_IX[k] = true);
+
+function streamBatch(size: number, skip?: number) {
+  const chunks: any[] = [];
+  let skipped = 0;
+  return through.obj(function(d, enc, cb) {
+    if (!skip || skipped >= skip) {
+      chunks.push(d);
+      if (chunks.length === size) {
+        this.push(chunks.slice());
+        chunks.length = 0;
+      }
+    } else if (skip) {
+      skipped += 1;
+    }
+    cb();
+  }, function(cb) {
+    if (chunks.length) {
+      this.push(chunks);
+    }
+    cb();
+  });
+}
 
 function normalizeDocument(doc: any) {
   Object.keys(doc).forEach((k) => {
@@ -41,9 +65,31 @@ function normalizeDocument(doc: any) {
   return doc;
 }
 
-pipeline(
-  createReadStream(DATA_FILE),
-  csvParse({ from: 2, delimiter: ',', columns: HEADERS.slice() }),
-  map.obj(normalizeDocument),
-  search.indexes.use('artworks9').createIndexingStream(),
-);
+console.log('reading');
+const search = new SearchService(SEARCH_SERVICE, SEARCH_KEY);
+
+console.log('parsing');
+let counter = 0;
+createReadStream(DATA_FILE, 'utf8')
+  .pipe(
+    csvParse({
+      delimiter: ',',
+      columns: HEADERS.slice(),
+    }),
+  )
+  .pipe(through.obj(function(d, enc, cb) {
+    this.push(normalizeDocument(d));
+    cb();
+  }))
+  .pipe(streamBatch(BATCH_SIZE))
+  .pipe(through.obj((d, enc, cb) => {
+    counter += d.length;
+    console.log(d.length, counter);
+    search.indexes.use(INDEX_NAME)
+      .index(d)
+      .then(() => cb())
+      .catch((err) => {
+        console.error(err);
+        cb(err);
+      });
+  }));

@@ -16,15 +16,17 @@
     "@types/lodash": "^4.14.119",
     "@types/superagent": "^3.8.5",
     "@types/through2": "^2.0.34",
-    "azure-search-client": "^2.2.3",
+    "azure-search-client": "^3.0.6",
     "csv-parse": "^4.1.0",
     "dotenv": "^6.2.0",
     "fs-extra": "^7.0.1",
     "lodash": "^4.17.11",
     "through-batch": "^1.0.0",
-    "through2": "^3.0.0"
+    "through2": "^3.0.0",
+    "through2-map": "^3.0.0"
   },
   "devDependencies": {
+    "@types/through2-map": "^3.0.0",
     "tslint": "^5.11.0",
     "typescript": "^3.2.2"
   }
